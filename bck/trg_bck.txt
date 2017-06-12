@@ -1,0 +1,192 @@
+
+% Класс представляющую собой цель, содержет основную логику расчета
+classdef Target
+    
+    properties
+        armorQuadrangles = ArmorQuadrangle.empty;
+    end
+    
+    methods
+        function obj = Target(armorQuadrangles)
+            
+            if nargin ==0
+                error('Please define targets elements')
+            end
+            
+            obj.armorQuadrangles = armorQuadrangles;
+        end
+        
+        %   Расчет вероятного бронирования при нормальном распеделении точек
+        function p = calculateArmorWithUniformDistribution(obj,n,step)
+            p =   obj.calculate(n,step,'uniform',[]);
+        end
+        
+        %         Расчет вероятного бронирования при нормальном распеделении точек
+        function p = calculateArmorWithNormalDistribution(obj,n,step,sigma)
+            p =   obj.calculate(n,step,'norm',sigma);
+        end
+        
+        %Оснавной расчетный метод, логика расчета одинакова не зависимо от
+        %распределения точек
+        function p = calculate(obj,n,step,distributionType, additionalParam)
+            arrayLength = (((90)/step + 1) * ( 180/step + 1) * 2);
+            x = zeros(1,arrayLength);
+            y = zeros(1,arrayLength);
+            z = zeros(1,arrayLength);
+            xS = zeros(1,arrayLength);
+            yS = zeros(1,arrayLength);
+            zS = zeros(1,arrayLength);
+            quads = filterQuads(obj.armorQuadrangles);
+            arrayIndex = 1;
+            r = 1000;
+            center = calculateCenter(obj,obj.armorQuadrangles);
+            failCount = 0;
+            %Обходим половину цели с  заданным шагом
+            for tetta=90:-step:0
+                for phi = -90 :step: 90
+                    perspective = [r * sind(tetta)*sind(phi),r*cosd(tetta),...
+                        r*sind(tetta)*cosd(phi)];
+                    viewVector = getViewVector(obj,perspective,center);
+                    %                   Находим те грани модели которые мы видим из данной
+                    %                   токи перспективы
+                    visibleQuads = obj.getVisibleQuads(viewVector);
+
+                    %                     Генерируем точки на проекции цели в зависимости от
+                    %                     вида распределения
+                    area = getQuadrangleArea(visibleQuads);
+                    planeNorm = viewVector / norm(viewVector);
+                    planePoint = perspective;
+                    projectedArea = projectAreaOnPlane(area,planeNorm,planePoint);
+                    if (strcmp(distributionType,'norm'))
+                        sigma = additionalParam;
+                        currCenter =  obj.calculateCenter(visibleQuads);
+                        [ randX, randY,randZ ] = generateNormalDistributedPoints( currCenter, n,sigma,planeNorm,planePoint);
+                    else
+                        [ randX, randY,randZ ] = generateUniformDistributedPoints( projectedArea, n,planePoint,planeNorm);
+                    end
+                    totalThick = 0;
+                    counter = 0;
+                    %                     Сопоставляем точки с видимыми гранями цели
+                    for i =1:1:length(visibleQuads)
+                        currentQuad = visibleQuads(i);
+                        currentArea = getQuadrangleArea(currentQuad);
+                        projectedArea =  projectAreaOnPlane(currentArea,planeNorm,planePoint);
+                        size = length(randX);
+                        for j =size:-1:1
+                            if (inside(projectedArea,randX(j),randY(j),randZ(j)))
+                                counter = counter + 1;
+                                % Учитываем угол под которым проникает КС
+                                angle = calculateAngle(perspective,[ randX(j),randY(j),randZ(j)],currentQuad);
+                                totalThick = (totalThick + currentQuad.armorThickness/cos(angle));
+                                randX(j) = [];
+                                randY(j) = [];
+                                randZ(j) = [];
+                            end
+                        end
+                    end
+                    averageThick = totalThick/counter;
+                    x(arrayIndex)  = averageThick.* sind(phi).*sind(tetta);
+                    y(arrayIndex) =  averageThick.* cosd(tetta);
+                    z(arrayIndex) =  averageThick.* cosd(phi).*sind(tetta);
+                    arrayIndex = arrayIndex + 1;
+                    %        Считаем количество точек в которых происходило непробитите.
+                    if (averageThick  > l)
+                        failCount  = failCount + 1;
+                    end
+                    if (tetta == 0)
+                        break;
+                    end
+                    
+                end
+            end
+            %             Отражаем полученные координаты, получаем вторую часть танка
+            for i =arrayLength / 2 - 1: -1 :2
+                x(arrayIndex) = x(i);
+                y(arrayIndex) = y(i);
+                z(arrayIndex) = z(i)* - 1;
+                arrayIndex = arrayIndex + 1;
+            end
+            %             Строим поверхности, и выводим результат
+            filenameTemplate = 'C:/Users/1/Desktop/Учеба/Диплом/Прога/result/data/calculation_%s.txt';
+            filename = sprintf(filenameTemplate,distributionType);
+            writeResultToFile([x; y; z],filename);
+            plotCaclulatedArmored(x, y, z,xS,yS,zS);
+            plotTarget(obj,1.8);
+            p = 1 -  failCount/arrayLength;
+        end
+        
+        function p =  dissectDataWithBreakeage(obj,filename, depth )
+            
+            [x,y,z] = loadResultFromFile(filename);
+            phi=linspace(0,pi,30);
+            theta=linspace(0,2*pi,40);
+            [phi,theta]=meshgrid(phi,theta);
+            xS=depth*sin(phi).*cos(theta);
+            zS=depth*sin(phi).*sin(theta); 
+            yS=depth*cos(phi); 
+            plotCaclulatedArmored(x, y, z,xS,yS,zS);
+%             plotTarget(obj,1.8);
+            failCount = 0;
+            for i = 1:1:length(x)
+                r = (x(i)^2 +y(i)^2 + z(i)^2)^(1/2);
+                if  r > depth
+                    failCount =  failCount + 1;
+                end
+            end
+            n = length(x);
+            p =  1- failCount/n;
+        end
+        %          В завиимости от направления нормали в грани находим видимые
+        %          грани
+        function visibleQuads = getVisibleQuads(obj,viewVector)
+            warning('off','all');
+            visibleQuads = ArmorQuadrangle.empty;
+            quads = obj.armorQuadrangles;
+            for i = 1:1:length(quads)
+                currentQuad = quads(i);
+                multi = sum(viewVector.*currentQuad.normal);
+                if (multi < -10)
+                    visibleQuads = [visibleQuads,currentQuad];
+                end
+            end
+        end
+        
+        function viewVector =  getViewVector(~,perspectiveCenter,center)
+            viewVector = perspectiveCenter - center;
+        end
+        
+        %   Находим центр цели
+        function center = calculateCenter(~,quads)
+            centers = arrayfun(@(armorQuadrangles) armorQuadrangles.findCenter, ...
+                quads,'UniformOutput',false);
+            areas = arrayfun(@(armorQuadrangles) armorQuadrangles.calculateArea, ...
+                quads);
+            
+            X = cell2mat(cellfun(@(center) center(1),centers,'UniformOutput',false));
+            Y = cell2mat(cellfun(@(center) center(2),centers,'UniformOutput',false));
+            Z = cell2mat(cellfun(@(center) center(3),centers,'UniformOutput',false));
+            
+            xCenter = sum(X.*areas)/sum(areas);
+            yCenter = sum(Y.*areas)/sum(areas);
+            zCenter = sum(Z.*areas)/sum(areas);
+            
+            center = [xCenter yCenter zCenter];
+        end
+        
+        %   Строим цель
+        function plotTarget(obj, scaleFactor)
+            
+            hold on;
+            for i=1:1:length(obj.armorQuadrangles)
+                obj.armorQuadrangles(i).plotQuadrangle(scaleFactor);
+            end
+            hold off;
+        end
+    end
+end
+
+
+
+
+
+

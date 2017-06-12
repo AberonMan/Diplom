@@ -1,0 +1,56 @@
+function [ randX, randY,randZ ] = generateUniformDistributedPoints( quads, n,... 
+    planePoint,planeNorm)
+
+randX = zeros(1,n);
+randY = zeros(1,n);
+projectedPoints = {};
+for i =1:1:length(quads)
+    currentQuad = quads(i);
+    points = projectAreaOnPlane(currentQuad.getPoints(),[0,1,0],[0,0,0]);
+        points = projectAreaOnPlane(currentQuad.getPoints(),[0,1,0],[0,0,0]);
+    projectedPoints = [projectedPoints,points];
+end
+x = cell2mat(cellfun(@(center) center(1),projectedPoints,'UniformOutput',false));
+z = cell2mat(cellfun(@(center) center(3),projectedPoints,'UniformOutput',false));
+ix=convhull(x,z);
+calcN = ceil(sqrt(n));
+randX = min(x) + abs(min(x) - max(x))*rand(1,calcN);
+randZ = min(z) + abs(min(z)- max(z))*rand(1,calcN);
+
+resultRundX = [];
+resultRundZ = [];
+
+while(length(resultRundX) < n)
+    xP = x(ix);
+    zP =z(ix);
+    [xd,zd]=meshgrid(randX,randZ);
+    ip=inpolygon(xd,zd,xP,zP);
+    innerXPoint = xd(ip);
+    innerZPoint = zd(ip);
+    len = 0;
+    if ( length(resultRundX) + length(innerXPoint) < n)
+        len = length(innerXPoint); 
+    else
+        len = n - length(resultRundX);
+    end
+    resultRundX = [resultRundX innerXPoint(1:len)'];
+    resultRundZ = [resultRundZ innerZPoint(1:len)'];
+end
+% for i =1:1:n
+%    randomPoint =  projectPoint([resultRundX(i),0,resultRundZ(i)],planeNorm,planePoint);
+%    randX(i) = randomPoint(1);
+%    randY(i) = randomPoint(2);
+%    randZ(i) = randomPoint(3);
+% end
+
+end
+
+
+
+% for i =1:1:n
+%    point = projectPoint([randX(i) randY(i) randZ(i)],planeNorm,planePoint);
+%    randX(i) = point(1);
+%    randY(i) = point(2);
+%    randZ(i) = point(3);
+% en
+

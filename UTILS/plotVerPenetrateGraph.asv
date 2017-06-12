@@ -1,0 +1,11 @@
+function plotVerPenetrateGraph( filename, beginDepth, endDepth, step)
+(endDepth - beginDepth)/step
+p = zeros(1, (endDepth - beginDepth)/step);
+depth =linspace(beginDepth,endDepth,step);
+for i = 1:1:length(depth)
+    p(i) = dissectDataWithBreakeage(filename,depth(i));
+end
+plot(p,depth);
+
+end
+
